@@ -8,32 +8,48 @@ import re
 import requests
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
 
-# LINE Channel 設定
+# LINE Channel settings
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
 LINE_CHANNEL_SECRET       = os.getenv("CHANNEL_SECRET")
 
 line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler      = WebhookHandler(LINE_CHANNEL_SECRET)
 
-# プレミアム判定用 GAS エンドポイント（後で貼る）
-GAS_URL = "https://script.google.com/macros/s/AKfycbxBcVv1m-Q2mAznSBOo1oZYSCTTG-S3m6KET05yNY9Mg3jBNsGtxOE0UUdh-YbftrGW7g/exec"
+# Premium check endpoint (update with your GAS URL)
+GAS_URL = os.getenv("GAS_URL")  # e.g. "https://script.google.com/macros/s/..../exec"
 
-# JSONファイルから全15話を読み込む
+# Load episodes (1-15) from JSON
 with open("kimishiranai_episodes_1to15.json", encoding="utf-8") as f:
     data = json.load(f)
-
-# データを辞書化: key="1"〜"15"
 story_data = {str(ep["episode"]): ep for ep in data.get("episodes", [])}
 
-# 無料公開話数
-FREE_LIMIT = 3
-# アンロックコード
-UNLOCK_CODE = "kimishiranai_unlock"
+# Unlock settings
+tmp_FREE_LIMIT = 3
+UNLOCK_CODE  = "kimishiranai_unlock"
 
+# Helper: check if user is premium
+
+def is_premium_user(user_id: str) -> bool:
+    try:
+        resp = requests.get(GAS_URL, params={"user_id": user_id}, timeout=5)
+        return resp.json().get("exists", False)
+    except Exception:
+        return False
+
+# Helper: register premium user
+
+def register_premium_user(user_id: str):
+    try:
+        requests.post(GAS_URL, json={"user_id": user_id}, timeout=5)
+    except Exception:
+        pass
+
+# Webhook callback
 @app.route("/callback", methods=["POST"])
 def callback():
     signature = request.headers.get("X-Line-Signature", "")
@@ -42,29 +58,14 @@ def callback():
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
-    return "OK", 200
+    return "OK"
 
-# プレミアム判定関数
-def is_premium_user(user_id: str) -> bool:
-    try:
-        resp = requests.get(GAS_URL, params={"user_id": user_id}, timeout=5)
-        return resp.json().get("exists", False)
-    except:
-        return False
-
-# プレミアム登録関数
-def register_premium_user(user_id: str):
-    try:
-        requests.post(GAS_URL, json={"user_id": user_id}, timeout=5)
-    except:
-        pass
-
-@handler.add(MessageEvent, message=TextMessage)
+# Message handler\@handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     text    = event.message.text.strip()
     user_id = event.source.user_id
 
-    # Unlock コード
+    # Unlock code logic
     if text == UNLOCK_CODE:
         register_premium_user(user_id)
         line_bot_api.reply_message(
@@ -73,7 +74,7 @@ def handle_message(event):
         )
         return
 
-    # 数字入力チェック
+    # Expect numeric input
     m = re.fullmatch(r"(\d{1,2})", text)
     if not m:
         line_bot_api.reply_message(
@@ -90,29 +91,28 @@ def handle_message(event):
         )
         return
 
-    # 無料／有料振り分け
-    idx = int(num)
-    if idx > FREE_LIMIT and not is_premium_user(user_id):
+    episode_index = int(num)
+    # Free vs premium check
+    if episode_index > tmp_FREE_LIMIT and not is_premium_user(user_id):
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="🔒 第4話以降はプレミアム限定です。"
+            TextSendMessage(text="🔒 第4話以降はプレミアム限定です。\nhttps://note.com/loyal_cosmos1726/n/nefdff71e226f")
         )
         return
 
-    # 該当エピソードを送信
+    # Send episode content
     ep = story_data[num]
     messages = []
-    # サブタイトル if any
-    title = ep.get("title") or ep.get("subtitle")
-    if title:
-        messages.append(TextSendMessage(text=title))
-    # 吹き出し②〜⑤
+    # Episode title
+    if "title" in ep:
+        messages.append(TextSendMessage(text=f"【第{num}話】 {ep['title']}"))
+    # Lines ②〜⑤
     for line in ep.get("lines", []):
-        messages.append(TextSendMessage(text=line.get("text")))
+        messages.append(TextSendMessage(text=line.get("text", "")))
 
     line_bot_api.reply_message(event.reply_token, messages)
 
-# 本番は gunicorn で起動
-#if __name__ == "__main__":
-#    port = int(os.environ.get("PORT", 10000))
-#    app.run(host="0.0.0.0", port=port)
+# Run with Gunicorn in production
+# if __name__ == "__main__":
+#     port = int(os.environ.get("PORT", 10000))
+#     app.run(host="0.0.0.0", port=port)
