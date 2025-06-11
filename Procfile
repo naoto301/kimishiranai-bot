@@ -1,1 +1,1 @@
-web: gunicorn tuning_bot:app
+web: gunicorn kimishiranai_bot:app
