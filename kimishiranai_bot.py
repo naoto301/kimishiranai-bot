@@ -60,7 +60,8 @@ def callback():
         abort(400)
     return "OK"
 
-# Message handler\@handler.add(MessageEvent, message=TextMessage)
+# Message handler
+@handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
     text    = event.message.text.strip()
     user_id = event.source.user_id
