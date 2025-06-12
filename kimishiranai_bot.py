@@ -4,66 +4,62 @@ from linebot.exceptions import InvalidSignatureError
 from linebot.models import MessageEvent, TextMessage, TextSendMessage
 import os
 import json
+import re
 import requests
 from dotenv import load_dotenv
 
+# Load environment variables
 load_dotenv()
 
 app = Flask(__name__)
 
-# LINE Bot credentials
+# LINE Channel settings
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("CHANNEL_ACCESS_TOKEN")
-LINE_CHANNEL_SECRET = os.getenv("CHANNEL_SECRET")
-line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
-handler = WebhookHandler(LINE_CHANNEL_SECRET)
+LINE_CHANNEL_SECRET       = os.getenv("CHANNEL_SECRET")
 
-# GAS Web App URL（POSTを送信する先）
-GAS_URL = "https://script.google.com/macros/s/AKfycbzRFz1_COA5fpUgTA_QpVV-XIvir1hxyp4rnnRplgw2BKCDlQGzVdacicHjisR3FjxsAQ/exec"
+line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
+handler      = WebhookHandler(LINE_CHANNEL_SECRET)
+
+# Premium check endpoint
+GAS_URL = os.getenv("GAS_URL")
+
+# Load episodes
+with open("kimishiranai_episodes_1to15.json", encoding="utf-8") as f:
+    data = json.load(f)
+story_data = {str(ep["episode"]): ep for ep in data.get("episodes", [])}
+
+# プレミアム関連
+tmp_FREE_LIMIT = 3
 UNLOCK_CODE = "kimishiranai_unlock"
 
-# ストーリーデータの読み込み
-with open("kimishiranai_episodes_1to15.json", "r", encoding="utf-8") as f:
-    episodes = json.load(f)
-
-# ヘルパー：プレミアムユーザーかどうかをGASに問い合わせ
 def is_premium_user(user_id: str) -> bool:
     try:
-        response = requests.get(GAS_URL, params={"user_id": user_id}, timeout=5)
-        data = response.json()
-        return data.get("exists", False)
-    except Exception as e:
-        print(f"[ERROR] Premium check failed: {e}")
+        resp = requests.get(GAS_URL, params={"user_id": user_id}, timeout=5)
+        return resp.json().get("exists", False)
+    except Exception:
         return False
 
-# ヘルパー：プレミアムユーザーとしてGASに登録
 def register_premium_user(user_id: str):
     try:
-        print(f"[DEBUG] Registering premium user: {user_id}")
-        response = requests.post(GAS_URL, json={"user_id": user_id}, timeout=5)
-        print(f"[DEBUG] GAS response: {response.status_code}, {response.text}")
-    except Exception as e:
-        print(f"[ERROR] Failed to register premium user: {e}")
+        requests.post(GAS_URL, json={"user_id": user_id}, timeout=5)
+    except Exception:
+        pass
 
-# メインのWebhookエンドポイント
 @app.route("/callback", methods=["POST"])
 def callback():
-    signature = request.headers["X-Line-Signature"]
+    signature = request.headers.get("X-Line-Signature", "")
     body = request.get_data(as_text=True)
-
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
         abort(400)
-
     return "OK"
 
-# メッセージイベント処理
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    user_id = event.source.user_id
     text = event.message.text.strip()
+    user_id = event.source.user_id
 
-    # プレミアムアンロックコードの処理
     if text == UNLOCK_CODE:
         register_premium_user(user_id)
         line_bot_api.reply_message(
@@ -72,24 +68,32 @@ def handle_message(event):
         )
         return
 
-    # 話数リクエスト処理（例：「3」など）
-    if text.isdigit():
-        episode_number = text
-        if episode_number not in episodes:
-            reply = "❌ 該当する話が見つかりませんでした。\n数字で話数を入力してください（例：1）"
-        elif int(episode_number) >= 4 and not is_premium_user(user_id):
-            reply = "🔒 この話を読むにはプレミアム登録が必要です。\nアンロックコードを入力してください。"
-        else:
-            reply = "\n\n".join(episodes[episode_number])
-    else:
-        reply = "📖 読みたい話数を数字で送ってください（例：1）"
+    m = re.fullmatch(r"(\d{1,2})", text)
+    if not m:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="『3』のように話数を数字で送ってください。")
+        )
+        return
 
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=reply)
-    )
+    num = m.group(1)
+    if num not in story_data:
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="指定の話は存在しません。1〜15の数字を送ってください。")
+        )
+        return
 
-# サーバ起動用（RenderではPORT環境変数を使用）
-if __name__ == "__main__":
-    port = int(os.getenv("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    episode_index = int(num)
+    if episode_index > tmp_FREE_LIMIT and not is_premium_user(user_id):
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="🔒 第4話以降はプレミアム限定です。\nhttps://note.com/loyal_cosmos1726/n/nefdff71e226f")
+        )
+        return
+
+    ep = story_data[num]
+    bubbles = [TextSendMessage(text=f"📕 第{ep['episode']}話「{ep['title']}」")]
+    for line in ep["lines"]:
+        bubbles.append(TextSendMessage(text=line["text"]))
+    line_bot_api.reply_message(event.reply_token, bubbles)
