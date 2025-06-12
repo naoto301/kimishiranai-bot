@@ -18,7 +18,7 @@ line_bot_api = LineBotApi(LINE_CHANNEL_ACCESS_TOKEN)
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 
 # GAS Web App URL（POSTを送信する先）
-GAS_URL = "https://script.google.com/macros/s/AKfycbxB62F2QQh5zWvUTmIFCxgRdxVV9QgZSG0sE0ogZK-1t0F7DUN-1lxfcb-q_efcnP1noQ/exec"
+GAS_URL = "https://script.google.com/macros/s/AKfycbzRFz1_COA5fpUgTA_QpVV-XIvir1hxyp4rnnRplgw2BKCDlQGzVdacicHjisR3FjxsAQ/exec"
 UNLOCK_CODE = "kimishiranai_unlock"
 
 # ストーリーデータの読み込み
