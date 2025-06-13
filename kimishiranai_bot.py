@@ -88,7 +88,7 @@ def handle_message(event):
     if episode_index > tmp_FREE_LIMIT and not is_premium_user(user_id):
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="🔒 第4話以降はプレミアム限定です。\nhttps://note.com/loyal_cosmos1726/n/nefdff71e226f")
+            TextSendMessage(text="🔒 第4話以降はプレミアム限定です。\nhttps://note.com/loyal_cosmos1726/n/ndee65edc41fb")
         )
         return
 
